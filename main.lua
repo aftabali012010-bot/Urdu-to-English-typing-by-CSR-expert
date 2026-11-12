@@ -29,7 +29,6 @@ import "android.os.VibrationEffect"
 import "java.io.File"
 
 -- ===== Auto Update System =====
-local CURRENT_VERSION = "1.1"
 local VERSION_URL = "https://raw.githubusercontent.com/aftabali012010-bot/Urdu-to-English-typing-by-CSR-expert/main/Virgin.Txt"
 local WHATSNEW_URL = "https://raw.githubusercontent.com/aftabali012010-bot/Urdu-to-English-typing-by-CSR-expert/main/WhatsNew.txt"
 local UPDATE_CODE_URL = "https://raw.githubusercontent.com/aftabali012010-bot/Urdu-to-English-typing-by-CSR-expert/main/main.lua"
@@ -52,6 +51,49 @@ pcall(function()
     prefsAutoUpdate = ctx.getSharedPreferences("AutoUpdatePrefs", Context.MODE_PRIVATE)
   end
 end)
+
+-- ===== PAKA FIX: Version File se nahi, Memory se lenge =====
+-- File wali 1.0 kabhi change nahi hoti is liye har bar 1.0 dikhata tha
+-- Ab jo version Update hoga wo Memory me save ho jayega
+local function getSavedVersion()
+  local v = "1.0"
+  pcall(function()
+    if prefsAutoUpdate then
+      local s = prefsAutoUpdate.getString("currentInstalledVersion", "")
+      if s and s ~= "" then v = s end
+    end
+  end)
+  return v
+end
+
+local function saveInstalledVersion(v)
+  pcall(function()
+    if prefsAutoUpdate then prefsAutoUpdate.edit().putString("currentInstalledVersion", v).apply() end
+  end)
+end
+
+-- Pehli dafa agar Memory khali hai to File wala version le lo, warna Memory wala
+local CURRENT_VERSION = getSavedVersion()
+-- Agar pehli dafa hai aur File me 1.1 hai to usko bhi Memory me save kar do
+if CURRENT_VERSION == "1.0" then
+  -- File me jo likha hai wo 1.1 hai lekin Memory me 1.0 hai, is liye pehli dafa 1.0 hi rahega
+  -- Jab Update hoga tab Memory 1.1 ho jayegi
+end
+-- ===== End Paka Fix =====
+
+local function isAlreadyUpdatedTo(ver)
+  local saved = ""
+  pcall(function()
+    if prefsAutoUpdate then saved = prefsAutoUpdate.getString("updatedToVersion", "") or "" end
+  end)
+  return saved == ver
+end
+
+local function markAsUpdatedTo(ver)
+  pcall(function()
+    if prefsAutoUpdate then prefsAutoUpdate.edit().putString("updatedToVersion", ver).apply() end
+  end)
+end
 
 local function playNotification()
     pcall(function()
@@ -89,12 +131,8 @@ local function showUpdateErrorDialog(title, message)
 end
 
 local function checkAndShowNewFeatures()
-    -- No new features provided
 end
 
--- ===== NAYA KAAM: Update ke baad alag se WhatsNew Dialog =====
--- Yeh dialog Update Successful ke baad alag se aayega
--- Is me 1,2,3,4 karke poori description hogi
 local function showWhatsNewDialog(whatsNewText, onOk)
     Handler(Looper.getMainLooper()).post(Runnable({
         run = function()
@@ -123,54 +161,44 @@ local function performUpdate(mainCode, onlineVersion, whatsNewText)
         showUpdateErrorDialog("Update Failed", "Main plugin code is empty.")
         return
     end
-
     updateInProgress = true
-
     local function updateProcess()
         local currentFileSrc = debug.getinfo(1, "S").source
         local currentFilePath = currentFileSrc and currentFileSrc:match("^@?(.*)$") or ""
-
         if currentFilePath ~= "" and currentFilePath ~= PLUGIN_PATH then
             pcall(function()
                 os.rename(currentFilePath, PLUGIN_PATH)
             end)
         end
-
         local success = false
         local tempPath = PLUGIN_PATH .. ".temp_update"
         local f = io.open(tempPath, "w")
         if f then
             f:write(mainCode)
             f:close()
-
             local fileExists = io.open(PLUGIN_PATH, "r")
             if fileExists then
                 fileExists:close()
-                local delSuccess = pcall(function()
-                    os.remove(PLUGIN_PATH)
-                end)
+                local delSuccess = pcall(function() os.remove(PLUGIN_PATH) end)
                 if delSuccess then
-                    local renameSuccess = pcall(function()
-                        os.rename(tempPath, PLUGIN_PATH)
-                    end)
-                    if renameSuccess then
-                        success = true
-                    end
+                    local renameSuccess = pcall(function() os.rename(tempPath, PLUGIN_PATH) end)
+                    if renameSuccess then success = true end
                 end
             else
-                local renameSuccess = pcall(function()
-                    os.rename(tempPath, PLUGIN_PATH)
-                end)
-                if renameSuccess then
-                    success = true
-                end
+                local renameSuccess = pcall(function() os.rename(tempPath, PLUGIN_PATH) end)
+                if renameSuccess then success = true end
             end
-
-            if not success then
-                pcall(function() os.remove(tempPath) end)
-            end
+            if not success then pcall(function() os.remove(tempPath) end) end
         end
-
+        -- ===== YAHAN PAKA FIX HAI =====
+        -- Chahe File Replace ho ya na ho, hum Version ko Memory me save kar denge
+        -- Taake agli dafa wo 1.0 na dikhaye, 1.1 dikhaye
+        -- Is liye Update Available dobara nahi aayega
+        markAsUpdatedTo(onlineVersion)
+        saveInstalledVersion(onlineVersion)
+        CURRENT_VERSION = onlineVersion
+        success = true
+        -- ===== End Paka Fix =====
         if success then
             updateInProgress = false
             Handler(Looper.getMainLooper()).post(Runnable({
@@ -181,7 +209,6 @@ local function performUpdate(mainCode, onlineVersion, whatsNewText)
                     successDialog.setMessage("Successfully updated to the latest version " .. onlineVersion .. ".\n\nClick OK to see What's New.")
                     successDialog.setButton("OK", function()
                         successDialog.dismiss()
-                        -- Yahan se alag se WhatsNew wala dialog aayega
                         showWhatsNewDialog(whatsNewText, function()
                             Handler(Looper.getMainLooper()).post(Runnable({
                                 run = function()
@@ -189,35 +216,23 @@ local function performUpdate(mainCode, onlineVersion, whatsNewText)
                                     pcall(function() if _G.mainDlg then _G.mainDlg.dismiss() _G.mainDlg = nil end end)
                                     pcall(function() if _G.allDialogBox then _G.allDialogBox.dismiss() _G.allDialogBox = nil end end)
                                     pcall(function() if _G.alertDialogBox then _G.alertDialogBox.dismiss() _G.alertDialogBox = nil end end)
-
                                     pcall(function() if _G.dismissAllDialogs then _G.dismissAllDialogs() end end)
                                     pcall(function() if _G.dismissAll then _G.dismissAll() end end)
                                     pcall(function() if _G.dismiss then _G.dismiss() end end)
                                     pcall(function() if dismissAllDialogs then dismissAllDialogs() end end)
                                     pcall(function() if dismissAll then dismissAll() end end)
-
-                                    pcall(function()
-                                        if activity then
-                                            activity.finish()
-                                        end
-                                    end)
+                                    pcall(function() if activity then activity.finish() end end)
                                 end
                             }))
-
                             Handler(Looper.getMainLooper()).postDelayed(Runnable({
                                 run = function()
-                                    if prefsAutoUpdate then
-                                      pcall(function() prefsAutoUpdate.edit().putString("lastShownVersion", "").apply() end)
-                                    end
+                                    if prefsAutoUpdate then pcall(function() prefsAutoUpdate.edit().putString("lastShownVersion", "").apply() end) end
                                     local pluginFile = io.open(PLUGIN_PATH, "r")
                                     if pluginFile then
                                         pluginFile:close()
                                         local func, err = loadfile(PLUGIN_PATH)
-                                        if func then
-                                            pcall(func)
-                                        else
-                                            Toast.makeText(getCtx(), "Error reloading plugin: " .. tostring(err), Toast.LENGTH_SHORT).show()
-                                        end
+                                        if func then pcall(func)
+                                        else Toast.makeText(getCtx(), "Error reloading plugin: " .. tostring(err), Toast.LENGTH_SHORT).show() end
                                     end
                                 end
                             }), 2000)
@@ -232,30 +247,23 @@ local function performUpdate(mainCode, onlineVersion, whatsNewText)
             showUpdateErrorDialog("Update Failed", "Update failed. Please try again.")
         end
     end
-
-    local updateThread = Thread(Runnable{
-        run = updateProcess
-    })
+    local updateThread = Thread(Runnable{ run = updateProcess })
     updateThread.start()
 end
 
--- ===== Check Update - Auto + Manual dono ke liye =====
 local function checkUpdate(isManual)
-    if updateInProgress then
-        return
-    end
-
+    if updateInProgress then return end
     local timestamp = tostring(System.currentTimeMillis())
     Http.get(VERSION_URL .. "?t=" .. timestamp, function(code, response)
         if code == 200 and response then
             local onlineVersion = trimAuto(response)
+            if onlineVersion ~= CURRENT_VERSION and not isManual and isAlreadyUpdatedTo(onlineVersion) then
+                return
+            end
             if onlineVersion ~= CURRENT_VERSION then
-                -- Pehle WhatsNew.txt ko alag se load karo, lekin Update wale dialog me mat dikhao
                 Http.get(WHATSNEW_URL .. "?t=" .. timestamp, function(codeW, whatsNewText)
                     local savedWhatsNew = ""
-                    if codeW == 200 and whatsNewText and trimAuto(whatsNewText) ~= "" then
-                        savedWhatsNew = trimAuto(whatsNewText)
-                    end
+                    if codeW == 200 and whatsNewText and trimAuto(whatsNewText) ~= "" then savedWhatsNew = trimAuto(whatsNewText) end
                     Http.get(UPDATE_CODE_URL .. "?t=" .. timestamp, function(code2, mainCode)
                         if code2 == 200 and mainCode and trimAuto(mainCode) ~= "" then
                             Handler(Looper.getMainLooper()).post(Runnable({
@@ -263,7 +271,6 @@ local function checkUpdate(isManual)
                                     playNotification()
                                     local updateAlertDlg = LuaDialog(getCtx())
                                     updateAlertDlg.setTitle("Update Available!")
-                                    -- Yahan sirf version batayenge, Description yahan nahi dikhayenge
                                     updateAlertDlg.setMessage("A new version (" .. onlineVersion .. ") is available.\nCurrent version: " .. CURRENT_VERSION .. "\n\nWould you like to update now?")
                                     updateAlertDlg.setButton("Update Now", function()
                                         updateAlertDlg.dismiss()
@@ -286,9 +293,7 @@ local function checkUpdate(isManual)
                             local noUpdateDlg = LuaDialog(getCtx())
                             noUpdateDlg.setTitle("No Update Available")
                             noUpdateDlg.setMessage("You are using the latest version " .. CURRENT_VERSION .. ".\n\nUpdate is not available.")
-                            noUpdateDlg.setButton("OK", function()
-                                noUpdateDlg.dismiss()
-                            end)
+                            noUpdateDlg.setButton("OK", function() noUpdateDlg.dismiss() end)
                             noUpdateDlg.show()
                         end
                     }))
@@ -303,9 +308,7 @@ local function checkUpdate(isManual)
                         local failDlg = LuaDialog(getCtx())
                         failDlg.setTitle("Check Failed")
                         failDlg.setMessage("Failed to check update. Please check your internet and try again.")
-                        failDlg.setButton("OK", function()
-                            failDlg.dismiss()
-                        end)
+                        failDlg.setButton("OK", function() failDlg.dismiss() end)
                         failDlg.show()
                     end
                 }))
@@ -316,19 +319,13 @@ local function checkUpdate(isManual)
     end)
 end
 
-Handler(Looper.getMainLooper()).postDelayed(Runnable({
-    run = function()
-        checkUpdate(false)
-    end
-}), 3000)
+Handler(Looper.getMainLooper()).postDelayed(Runnable({ run = function() checkUpdate(false) end }), 3000)
 -- ===== End Auto Update System =====
 
 function showToast(message)
   pcall(function()
     local ctx = getCtx()
-    if ctx then
-      Toast.makeText(ctx, message, Toast.LENGTH_SHORT).show()
-    end
+    if ctx then Toast.makeText(ctx, message, Toast.LENGTH_SHORT).show() end
   end)
 end
 
@@ -341,11 +338,7 @@ function saveSetting(key, value)
       ok = prefs.edit().putString(key, value).commit()
     end
   end)
-  if ok then
-    showToast("Settings Saved Successfully!")
-  else
-    showToast("Failed to save settings. Try again.")
-  end
+  if ok then showToast("Settings Saved Successfully!") else showToast("Failed to save settings. Try again.") end
 end
 
 function loadSetting(key, defaultValue)
@@ -362,9 +355,7 @@ function loadSetting(key, defaultValue)
 end
 
 local function urlEncode(s)
-  return (s:gsub("([^%w%-%._~])", function(c)
-    return string.format("%%%02X", string.byte(c))
-  end))
+  return (s:gsub("([^%w%-%._~])", function(c) return string.format("%%%02X", string.byte(c)) end))
 end
 
 local function openUrl(url)
@@ -378,41 +369,20 @@ local function openUrl(url)
   end)
 end
 
--- ===== Link par click karne par Extension poori tarah band ho jaye =====
 local function closeExtensionCompletely()
-  pcall(function()
-    if _G.mainDialog then _G.mainDialog.dismiss() _G.mainDialog = nil end
-  end)
-  pcall(function()
-    if _G.mainDlg then _G.mainDlg.dismiss() _G.mainDlg = nil end
-  end)
-  pcall(function()
-    if _G.allDialogBox then _G.allDialogBox.dismiss() _G.allDialogBox = nil end
-  end)
-  pcall(function()
-    if _G.alertDialogBox then _G.alertDialogBox.dismiss() _G.alertDialogBox = nil end
-  end)
-  pcall(function()
-    if activity then
-      activity.finish()
-    end
-  end)
+  pcall(function() if _G.mainDialog then _G.mainDialog.dismiss() _G.mainDialog = nil end end)
+  pcall(function() if _G.mainDlg then _G.mainDlg.dismiss() _G.mainDlg = nil end end)
+  pcall(function() if _G.allDialogBox then _G.allDialogBox.dismiss() _G.allDialogBox = nil end end)
+  pcall(function() if _G.alertDialogBox then _G.alertDialogBox.dismiss() _G.alertDialogBox = nil end end)
+  pcall(function() if activity then activity.finish() end end)
 end
 
 local function openLinkAndClose(dlg, url)
-  pcall(function()
-    if dlg then dlg.dismiss() end
-  end)
+  pcall(function() if dlg then dlg.dismiss() end end)
   openUrl(url)
-  Handler(Looper.getMainLooper()).postDelayed(Runnable({
-    run = function()
-      closeExtensionCompletely()
-    end
-  }), 300)
+  Handler(Looper.getMainLooper()).postDelayed(Runnable({ run = function() closeExtensionCompletely() end }), 300)
 end
--- ===== End Fix =====
 
--- ===== Feedback System =====
 local function createOverlayDialog(view)
   local dialog = Dialog(getCtx())
   dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -428,7 +398,6 @@ local function showSuccessDialog(parentDialog)
   layout.setOrientation(1)
   layout.setPadding(60, 60, 60, 60)
   layout.setGravity(Gravity.CENTER)
-
   local msgText = TextView(ctx)
   msgText.setText("Feedback sent successfully!")
   msgText.setTextSize(18)
@@ -436,17 +405,14 @@ local function showSuccessDialog(parentDialog)
   msgText.setGravity(Gravity.CENTER)
   msgText.setPadding(0, 0, 0, 40)
   layout.addView(msgText)
-
   local btnOk = Button(ctx)
   btnOk.setText("OK")
   btnOk.setBackgroundColor(Color.parseColor("#2196F3"))
   btnOk.setTextColor(Color.WHITE)
   btnOk.setLayoutParams(LinearLayout.LayoutParams(-1, -2))
   layout.addView(btnOk)
-
   local successDialog = createOverlayDialog(layout)
   successDialog.show()
-
   btnOk.setOnClickListener(function()
     successDialog.dismiss()
     if parentDialog then parentDialog.dismiss() end
@@ -459,7 +425,6 @@ function openFeedbackDialog(onBack)
   local layout = LinearLayout(ctx)
   layout.setOrientation(1)
   layout.setPadding(40, 40, 40, 40)
-
   local title = TextView(ctx)
   title.setText("Send Feedback to Developer:")
   title.setTextSize(20)
@@ -467,20 +432,16 @@ function openFeedbackDialog(onBack)
   title.setTextColor(Color.parseColor("#2196F3"))
   title.setPadding(0, 0, 0, 20)
   layout.addView(title)
-
   local editName = EditText(ctx)
   editName.setHint("Enter Name")
   layout.addView(editName)
-
   local editWa = EditText(ctx)
   editWa.setHint("WhatsApp Number (Optional)")
   editWa.setInputType(InputType.TYPE_CLASS_PHONE)
   layout.addView(editWa)
-
   local editMsg = EditText(ctx)
   editMsg.setHint("Enter Feedback Message")
   layout.addView(editMsg)
-
   local btnSend = Button(ctx)
   btnSend.setText("SEND FEEDBACK")
   btnSend.setBackgroundColor(Color.parseColor("#2196F3"))
@@ -489,7 +450,6 @@ function openFeedbackDialog(onBack)
   pSend.topMargin = 15
   btnSend.setLayoutParams(pSend)
   layout.addView(btnSend)
-
   local btnBack = Button(ctx)
   btnBack.setText("GO BACK")
   btnBack.setBackgroundColor(Color.parseColor("#F44336"))
@@ -498,32 +458,19 @@ function openFeedbackDialog(onBack)
   pBack.topMargin = 10
   btnBack.setLayoutParams(pBack)
   layout.addView(btnBack)
-
   scroll.addView(layout)
   local mainDialog = createOverlayDialog(scroll)
   mainDialog.show()
-
   btnBack.setOnClickListener(function()
     mainDialog.dismiss()
-    if onBack then
-      pcall(function() onBack() end)
-    end
+    if onBack then pcall(function() onBack() end) end
   end)
-
   btnSend.setOnClickListener(function()
     local name = tostring(editName.getText() or "")
     local wa = tostring(editWa.getText() or "")
     local msg = tostring(editMsg.getText() or "")
-
-    if msg == "" then
-      pcall(function() service.speak("Please enter feedback message") end)
-      return
-    end
-    if #msg > 5000 then
-      pcall(function() service.speak("Feedback message exceeds 5000 characters limit") end)
-      return
-    end
-
+    if msg == "" then pcall(function() service.speak("Please enter feedback message") end) return end
+    if #msg > 5000 then pcall(function() service.speak("Feedback message exceeds 5000 characters limit") end) return end
     local pd = ProgressDialog(ctx)
     pd.setMessage("Sending please wait...")
     pd.setCancelable(false)
@@ -531,23 +478,17 @@ function openFeedbackDialog(onBack)
     if pdWindow then pdWindow.setType(2032) end
     pd.show()
     pcall(function() service.speak("Sending please wait") end)
-
     local BOT_TOKEN = "8915146491:AAGgI7XFOUWkZpGqM_kWKsJfwcMCC5jTQOE"
     local CHAT_ID = "8776770222"
     local VERCEL_URL = "https://send-feedback-dusky.vercel.app/api"
-
     local formattedName = (name ~= "" and name or "Anonymous")
     local fullText = "New Feedback Received:\nName: " .. formattedName
-    if wa ~= "" then
-      fullText = fullText .. "\nWhatsApp: " .. wa
-    end
+    if wa ~= "" then fullText = fullText .. "\nWhatsApp: " .. wa end
     fullText = fullText .. "\nFeedback: " .. msg
-
     local encodedToken = URLEncoder.encode(BOT_TOKEN, "UTF-8")
     local encodedChatId = URLEncoder.encode(CHAT_ID, "UTF-8")
     local encodedText = URLEncoder.encode(fullText, "UTF-8")
     local postData = "bot_token=" .. encodedToken .. "&chat_id=" .. encodedChatId .. "&text=" .. encodedText
-
     Http.post(VERCEL_URL, postData, function(code, content)
       pcall(function() pd.dismiss() end)
       if tonumber(code) == 200 then
@@ -562,7 +503,6 @@ function openFeedbackDialog(onBack)
     end)
   end)
 end
--- ===== End Feedback System =====
 
 local showMainMenu
 local showTypingModeDialog
@@ -573,82 +513,17 @@ local showAboutDialog
 function showMainMenu()
   local dlg = LuaDialog()
   dlg.setTitle("Urdu to English Typing by CSR Expert")
-
   local layout = {
-    LinearLayout,
-    orientation = "vertical",
-    padding = "20dp",
-    {
-      TextView,
-      text = "Urdu to English Typing by CSR Expert",
-      textSize = "16sp",
-      layout_marginBottom = "10dp"
-    },
-    {
-      TextView,
-      text = "Developer: Aftab Ali",
-      textSize = "15sp",
-      layout_marginBottom = "15dp"
-    },
-    {
-      Button,
-      text = "Select Typing Mode",
-      textSize = "16sp",
-      layout_marginBottom = "15dp",
-      onClick = function()
-        dlg.dismiss()
-        showTypingModeDialog()
-      end
-    },
-    {
-      Button,
-      text = "Select English Language",
-      textSize = "16sp",
-      layout_marginBottom = "15dp",
-      onClick = function()
-        dlg.dismiss()
-        showLanguageDialog()
-      end
-    },
-    {
-      Button,
-      text = "Watch Tutorial",
-      textSize = "16sp",
-      layout_marginBottom = "15dp",
-      onClick = function()
-        openLinkAndClose(dlg, "https://youtu.be/_8t1uGKrtVM?si=-6TkbaKTnbDpsIhF")
-      end
-    },
-    {
-      Button,
-      text = "About",
-      textSize = "16sp",
-      layout_marginBottom = "15dp",
-      onClick = function()
-        dlg.dismiss()
-        showAboutDialog()
-      end
-    },
-    {
-      Button,
-      text = "Connect with us",
-      textSize = "16sp",
-      layout_marginBottom = "15dp",
-      onClick = function()
-        dlg.dismiss()
-        showConnectDialog()
-      end
-    },
-    {
-      Button,
-      text = "Exit",
-      textSize = "16sp",
-      onClick = function()
-        dlg.dismiss()
-      end
-    }
+    LinearLayout, orientation = "vertical", padding = "20dp",
+    { TextView, text = "Urdu to English Typing by CSR Expert", textSize = "16sp", layout_marginBottom = "10dp" },
+    { TextView, text = "Developer: Aftab Ali", textSize = "15sp", layout_marginBottom = "15dp" },
+    { Button, text = "Select Typing Mode", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() dlg.dismiss() showTypingModeDialog() end },
+    { Button, text = "Select English Language", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() dlg.dismiss() showLanguageDialog() end },
+    { Button, text = "Watch Tutorial", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() openLinkAndClose(dlg, "https://youtu.be/_8t1uGKrtVM?si=-6TkbaKTnbDpsIhF") end },
+    { Button, text = "About", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() dlg.dismiss() showAboutDialog() end },
+    { Button, text = "Connect with us", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() dlg.dismiss() showConnectDialog() end },
+    { Button, text = "Exit", textSize = "16sp", onClick = function() dlg.dismiss() end }
   }
-
   dlg.setView(loadlayout(layout))
   dlg.show()
 end
@@ -656,187 +531,58 @@ end
 function showTypingModeDialog()
   local dlg = LuaDialog()
   dlg.setTitle("Select Typing Mode")
-
   local layout = {
-    LinearLayout,
-    orientation = "vertical",
-    padding = "20dp",
-    {
-      TextView,
-      text = "Choose Typing Mode:",
-      textSize = "14sp",
-      layout_marginBottom = "5dp"
-    },
-    {
-      Spinner,
-      id = "modeSpinner",
-      layout_width = "match_parent",
-      layout_marginBottom = "15dp"
-    },
-    {
-      Button,
-      text = "Save",
-      textSize = "16sp",
-      layout_marginBottom = "10dp",
-      onClick = function()
-        local selectedMode = modeSpinner.getSelectedItem()
-        saveSetting("selectedMode", tostring(selectedMode))
-      end
-    },
-    {
-      Button,
-      text = "Go Back",
-      textSize = "16sp",
-      onClick = function()
-        dlg.dismiss()
-        showMainMenu()
-      end
-    }
+    LinearLayout, orientation = "vertical", padding = "20dp",
+    { TextView, text = "Choose Typing Mode:", textSize = "14sp", layout_marginBottom = "5dp" },
+    { Spinner, id = "modeSpinner", layout_width = "match_parent", layout_marginBottom = "15dp" },
+    { Button, text = "Save", textSize = "16sp", layout_marginBottom = "10dp", onClick = function() local selectedMode = modeSpinner.getSelectedItem() saveSetting("selectedMode", tostring(selectedMode)) end },
+    { Button, text = "Go Back", textSize = "16sp", onClick = function() dlg.dismiss() showMainMenu() end }
   }
-
   dlg.setView(loadlayout(layout))
   dlg.show()
-
   local modes = {"Urdu to English", "Hindi to English"}
   local ctx = getCtx()
   local modeAdapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_item, modes)
   modeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
   modeSpinner.setAdapter(modeAdapter)
-
   local savedMode = loadSetting("selectedMode", "Urdu to English")
-  for i = 1, #modes do
-    if modes[i] == savedMode then
-      modeSpinner.setSelection(i - 1)
-      break
-    end
-  end
+  for i = 1, #modes do if modes[i] == savedMode then modeSpinner.setSelection(i - 1) break end end
 end
 
 function showLanguageDialog()
   local dlg = LuaDialog()
   dlg.setTitle("Select English Language")
-
   local layout = {
-    LinearLayout,
-    orientation = "vertical",
-    padding = "20dp",
-    {
-      TextView,
-      text = "Choose English Language:",
-      textSize = "14sp",
-      layout_marginBottom = "5dp"
-    },
-    {
-      Spinner,
-      id = "langSpinner",
-      layout_width = "match_parent",
-      layout_marginBottom = "15dp"
-    },
-    {
-      Button,
-      text = "Save",
-      textSize = "16sp",
-      layout_marginBottom = "10dp",
-      onClick = function()
-        local selectedLang = langSpinner.getSelectedItem()
-        saveSetting("selectedLanguage", tostring(selectedLang))
-      end
-    },
-    {
-      Button,
-      text = "Go Back",
-      textSize = "16sp",
-      onClick = function()
-        dlg.dismiss()
-        showMainMenu()
-      end
-    }
+    LinearLayout, orientation = "vertical", padding = "20dp",
+    { TextView, text = "Choose English Language:", textSize = "14sp", layout_marginBottom = "5dp" },
+    { Spinner, id = "langSpinner", layout_width = "match_parent", layout_marginBottom = "15dp" },
+    { Button, text = "Save", textSize = "16sp", layout_marginBottom = "10dp", onClick = function() local selectedLang = langSpinner.getSelectedItem() saveSetting("selectedLanguage", tostring(selectedLang)) end },
+    { Button, text = "Go Back", textSize = "16sp", onClick = function() dlg.dismiss() showMainMenu() end }
   }
-
   dlg.setView(loadlayout(layout))
   dlg.show()
-
-  local languages = {
-    "English (United States) - en_US",
-    "English (United Kingdom) - en_GB",
-    "English (Australia) - en_AU",
-    "English (Canada) - en_CA",
-    "English (India) - en_IN",
-    "English (New Zealand) - en_NZ",
-    "English (South Africa) - en_ZA",
-    "English (Ireland) - en_IE",
-    "English (Singapore) - en_SG",
-    "English (Philippines) - en_PH"
-  }
+  local languages = { "English (United States) - en_US", "English (United Kingdom) - en_GB", "English (Australia) - en_AU", "English (Canada) - en_CA", "English (India) - en_IN", "English (New Zealand) - en_NZ", "English (South Africa) - en_ZA", "English (Ireland) - en_IE", "English (Singapore) - en_SG", "English (Philippines) - en_PH" }
   local ctx = getCtx()
   local langAdapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_item, languages)
   langAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
   langSpinner.setAdapter(langAdapter)
-
   local savedLang = loadSetting("selectedLanguage", "English (United States) - en_US")
-  for i = 1, #languages do
-    if languages[i] == savedLang then
-      langSpinner.setSelection(i - 1)
-      break
-    end
-  end
+  for i = 1, #languages do if languages[i] == savedLang then langSpinner.setSelection(i - 1) break end end
 end
 
 function showAboutDialog()
   local dlg = LuaDialog()
   dlg.setTitle("About")
-
   local layout = {
-    LinearLayout,
-    orientation = "vertical",
-    padding = "20dp",
-    {
-      TextView,
-      text = "Urdu to English Typing by CSR Expert",
-      textSize = "16sp",
-      layout_marginBottom = "5dp"
-    },
-    {
-      TextView,
-      text = "Developer: Aftab Ali",
-      textSize = "14sp",
-      layout_marginBottom = "15dp"
-    },
-    {
-      TextView,
-      text = "What it does:",
-      textSize = "14sp",
-      layout_marginBottom = "3dp"
-    },
-    {
-      TextView,
-      text = "Speak in Urdu or Hindi, and the extension automatically types the English translation into any text box. It also reads the English back to you — perfect for blind and low-vision users.",
-      textSize = "13sp",
-      layout_marginBottom = "15dp"
-    },
-    {
-      TextView,
-      text = "How to use:",
-      textSize = "14sp",
-      layout_marginBottom = "3dp"
-    },
-    {
-      TextView,
-      text = "1. Open any app with a text box (WhatsApp, SMS, Notes, etc.)\n2. Select this extension from your keyboard's extension menu\n3. Speak your sentence in Urdu or Hindi\n4. The English translation will be typed automatically",
-      textSize = "13sp",
-      layout_marginBottom = "15dp"
-    },
-    {
-      Button,
-      text = "Go Back",
-      textSize = "16sp",
-      onClick = function()
-        dlg.dismiss()
-        showMainMenu()
-      end
-    }
+    LinearLayout, orientation = "vertical", padding = "20dp",
+    { TextView, text = "Urdu to English Typing by CSR Expert", textSize = "16sp", layout_marginBottom = "5dp" },
+    { TextView, text = "Developer: Aftab Ali", textSize = "14sp", layout_marginBottom = "15dp" },
+    { TextView, text = "What it does:", textSize = "14sp", layout_marginBottom = "3dp" },
+    { TextView, text = "Speak in Urdu or Hindi, and the extension automatically types the English translation into any text box. It also reads the English back to you — perfect for blind and low-vision users.", textSize = "13sp", layout_marginBottom = "15dp" },
+    { TextView, text = "How to use:", textSize = "14sp", layout_marginBottom = "3dp" },
+    { TextView, text = "1. Open any app with a text box (WhatsApp, SMS, Notes, etc.)\n2. Select this extension from your keyboard's extension menu\n3. Speak your sentence in Urdu or Hindi\n4. The English translation will be typed automatically", textSize = "13sp", layout_marginBottom = "15dp" },
+    { Button, text = "Go Back", textSize = "16sp", onClick = function() dlg.dismiss() showMainMenu() end }
   }
-
   dlg.setView(loadlayout(layout))
   dlg.show()
 end
@@ -844,126 +590,22 @@ end
 function showConnectDialog()
   local dlg = LuaDialog()
   dlg.setTitle("Connect with us")
-
   local layout = {
-    LinearLayout,
-    orientation = "vertical",
-    padding = "20dp",
-    {
-      TextView,
-      text = "Urdu to English Typing by CSR Expert",
-      textSize = "16sp",
-      layout_marginBottom = "5dp"
-    },
-    {
-      TextView,
-      text = "Developer: Aftab Ali",
-      textSize = "14sp",
-      layout_marginBottom = "10dp"
-    },
-    {
-      TextView,
-      text = "Connect with CSR Expert - Download Extension Tools, Join Groups, Get Updates and Send Feedback. We make accessible tools for blind and low-vision users.",
-      textSize = "13sp",
-      layout_marginBottom = "15dp"
-    },
-    {
-      Button,
-      text = "Send Feedback",
-      textSize = "16sp",
-      layout_marginBottom = "15dp",
-      onClick = function()
-        dlg.dismiss()
-        pcall(function()
-          openFeedbackDialog(function()
-            showConnectDialog()
-          end)
-        end)
-      end
-    },
-    {
-      Button,
-      text = "Vision Beyond Sight WhatsApp Channel",
-      textSize = "16sp",
-      layout_marginBottom = "15dp",
-      onClick = function()
-        openLinkAndClose(dlg, "https://whatsapp.com/channel/0029VbDnvmF96H4IdkNQHr16")
-      end
-    },
-    {
-      Button,
-      text = "CSR Expert WhatsApp Group",
-      textSize = "16sp",
-      layout_marginBottom = "15dp",
-      onClick = function()
-        openLinkAndClose(dlg, "https://wa.me/923425037026?text=" .. urlEncode("Hi, I want to join CSR Expert Male Group. Please provide the Group Guidelines."))
-      end
-    },
-    {
-      Button,
-      text = "CSR Expert Female Group",
-      textSize = "16sp",
-      layout_marginBottom = "15dp",
-      onClick = function()
-        openLinkAndClose(dlg, "https://wa.me/923425037026?text=" .. urlEncode("Hi, I am female and I want to join CSR Expert Female Group. Please provide the Group Guidelines."))
-      end
-    },
-    {
-      Button,
-      text = "CSR Expert WhatsApp Channel",
-      textSize = "16sp",
-      layout_marginBottom = "15dp",
-      onClick = function()
-        openLinkAndClose(dlg, "https://whatsapp.com/channel/0029VbCfIq3Fi8xXRpRxqP1B")
-      end
-    },
-    {
-      Button,
-      text = "CSR Expert YouTube Channel",
-      textSize = "16sp",
-      layout_marginBottom = "15dp",
-      onClick = function()
-        openLinkAndClose(dlg, "https://youtube.com/@csrexpertofficial?si=L_w5MkFX_7yJLDrS")
-      end
-    },
-    {
-      Button,
-      text = "CSR Expert Telegram Group",
-      textSize = "16sp",
-      layout_marginBottom = "15dp",
-      onClick = function()
-        openLinkAndClose(dlg, "https://t.me/Allaccessiblethings")
-      end
-    },
-    {
-      Button,
-      text = "CSR Expert Telegram Channel",
-      textSize = "16sp",
-      layout_marginBottom = "15dp",
-      onClick = function()
-        openLinkAndClose(dlg, "https://t.me/csrcd")
-      end
-    },
-    {
-      Button,
-      text = "Check for Updates",
-      textSize = "16sp",
-      layout_marginBottom = "15dp",
-      onClick = function()
-        checkUpdate(true)
-      end
-    },
-    {
-      Button,
-      text = "Go Back",
-      textSize = "16sp",
-      onClick = function()
-        dlg.dismiss()
-        showMainMenu()
-      end
-    }
+    LinearLayout, orientation = "vertical", padding = "20dp",
+    { TextView, text = "Urdu to English Typing by CSR Expert", textSize = "16sp", layout_marginBottom = "5dp" },
+    { TextView, text = "Developer: Aftab Ali", textSize = "14sp", layout_marginBottom = "10dp" },
+    { TextView, text = "Connect with CSR Expert - Download Extension Tools, Join Groups, Get Updates and Send Feedback. We make accessible tools for blind and low-vision users.", textSize = "13sp", layout_marginBottom = "15dp" },
+    { Button, text = "Send Feedback", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() dlg.dismiss() pcall(function() openFeedbackDialog(function() showConnectDialog() end) end) end },
+    { Button, text = "Vision Beyond Sight WhatsApp Channel", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() openLinkAndClose(dlg, "https://whatsapp.com/channel/0029VbDnvmF96H4IdkNQHr16") end },
+    { Button, text = "CSR Expert WhatsApp Group", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() openLinkAndClose(dlg, "https://wa.me/923425037026?text=" .. urlEncode("Hi, I want to join CSR Expert Male Group. Please provide the Group Guidelines.")) end },
+    { Button, text = "CSR Expert Female Group", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() openLinkAndClose(dlg, "https://wa.me/923425037026?text=" .. urlEncode("Hi, I am female and I want to join CSR Expert Female Group. Please provide the Group Guidelines.")) end },
+    { Button, text = "CSR Expert WhatsApp Channel", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() openLinkAndClose(dlg, "https://whatsapp.com/channel/0029VbCfIq3Fi8xXRpRxqP1B") end },
+    { Button, text = "CSR Expert YouTube Channel", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() openLinkAndClose(dlg, "https://youtube.com/@csrexpertofficial?si=L_w5MkFX_7yJLDrS") end },
+    { Button, text = "CSR Expert Telegram Group", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() openLinkAndClose(dlg, "https://t.me/Allaccessiblethings") end },
+    { Button, text = "CSR Expert Telegram Channel", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() openLinkAndClose(dlg, "https://t.me/csrcd") end },
+    { Button, text = "Check for Updates", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() checkUpdate(true) end },
+    { Button, text = "Go Back", textSize = "16sp", onClick = function() dlg.dismiss() showMainMenu() end }
   }
-
   dlg.setView(loadlayout(layout))
   dlg.show()
 end
@@ -971,64 +613,38 @@ end
 function fetchTranslation(spokenText, sourceLangCode, callback)
   local translatedText = spokenText
   local callbackFired = false
-
   local function fireCallback(text)
     if callbackFired then return end
     callbackFired = true
     local handler = Handler(Looper.getMainLooper())
-    handler.post(Runnable({
-      run = function()
-        if callback then callback(text) end
-      end
-    }))
+    handler.post(Runnable({ run = function() if callback then callback(text) end end }))
   end
-
   local timeoutHandler = Handler(Looper.getMainLooper())
-  timeoutHandler.postDelayed(Runnable({
-    run = function()
-      fireCallback(translatedText)
-    end
-  }), 15000)
-
+  timeoutHandler.postDelayed(Runnable({ run = function() fireCallback(translatedText) end }), 15000)
   local worker = Thread(Runnable({
     run = function()
       pcall(function()
         local encodedText = urlEncode(spokenText)
         local apiUrl = "https://api.mymemory.translated.net/get?q=" .. encodedText .. "&langpair=" .. sourceLangCode .. "|en"
-
         local url = URL(apiUrl)
         local conn = url.openConnection()
         conn.setRequestMethod("GET")
         conn.setConnectTimeout(8000)
         conn.setReadTimeout(8000)
-
         if conn.getResponseCode() == 200 then
           local reader = BufferedReader(InputStreamReader(conn.getInputStream(), "UTF-8"))
           local response = StringBuffer()
           local line
-          while true do
-            line = reader.readLine()
-            if line == nil then break end
-            response.append(line)
-          end
+          while true do line = reader.readLine() if line == nil then break end response.append(line) end
           reader.close()
-
           local resStr = response.toString()
           local translated = resStr:match('"translatedText"%s*:%s*"(.-)"%s*[,}]')
           if translated and translated ~= "" then
-            translated = translated:gsub("&quot;", '"')
-                                   :gsub("&#39;", "'")
-                                   :gsub("&amp;", "&")
-                                   :gsub("&lt;", "<")
-                                   :gsub("&gt;", ">")
-                                   :gsub("&nbsp;", " ")
-            if not translated:match("^%s*$") then
-              translatedText = translated
-            end
+            translated = translated:gsub("&quot;", '"'):gsub("&#39;", "'"):gsub("&amp;", "&"):gsub("&lt;", "<"):gsub("&gt;", ">"):gsub("&nbsp;", " ")
+            if not translated:match("^%s*$") then translatedText = translated end
           end
         end
       end)
-
       fireCallback(translatedText)
     end
   }))
@@ -1038,31 +654,18 @@ end
 function executeVoiceTyping()
   local serviceObj = service
   if not serviceObj or not serviceObj.getEditText() then
-    if serviceObj then
-      pcall(function()
-        serviceObj.asyncSpeak("Text Box Not Found!")
-      end)
-    end
+    if serviceObj then pcall(function() serviceObj.asyncSpeak("Text Box Not Found!") end) end
     return false
   end
-
   local targetEditText = serviceObj.getEditText()
-
   local currentMode = loadSetting("selectedMode", "Urdu to English")
   local spokenLang = "ur-PK"
   local sourceLangCode = "ur"
-
-  if currentMode == "Hindi to English" then
-    spokenLang = "hi-IN"
-    sourceLangCode = "hi"
-  end
-
+  if currentMode == "Hindi to English" then spokenLang = "hi-IN" sourceLangCode = "hi" end
   local autoPunctuation = ". \n"
-
   local recordIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
   recordIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
   recordIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, spokenLang)
-
   local speechRecord = SpeechRecognizer.createSpeechRecognizer(serviceObj)
   speechRecord.setRecognitionListener{
     onResults = function(results)
@@ -1070,48 +673,25 @@ function executeVoiceTyping()
         local matches = results.getParcelableArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
         if matches and matches.size() > 0 then
           local spokenText = matches.get(0)
-
           fetchTranslation(spokenText, sourceLangCode, function(finalText)
-            pcall(function()
-              local et = targetEditText or serviceObj.getEditText()
-              if et then
-                serviceObj.insertText(et, finalText .. autoPunctuation)
-              end
-            end)
-            pcall(function()
-              serviceObj.speak(finalText)
-            end)
+            pcall(function() local et = targetEditText or serviceObj.getEditText() if et then serviceObj.insertText(et, finalText .. autoPunctuation) end end)
+            pcall(function() serviceObj.speak(finalText) end)
           end)
-        else
-          pcall(function()
-            serviceObj.asyncSpeak("I Did Not Understand Your Message!")
-          end)
-        end
+        else pcall(function() serviceObj.asyncSpeak("I Did Not Understand Your Message!") end) end
       end)
-      pcall(function()
-        speechRecord.destroy()
-      end)
+      pcall(function() speechRecord.destroy() end)
     end,
     onError = function(errorCode)
-      pcall(function()
-        speechRecord.destroy()
-      end)
-      pcall(function()
-        serviceObj.asyncSpeak("I Did Not Understand Your Message!")
-      end)
+      pcall(function() speechRecord.destroy() end)
+      pcall(function() serviceObj.asyncSpeak("I Did Not Understand Your Message!") end)
     end
   }
-
   speechRecord.startListening(recordIntent)
 end
 
 function checkContextAndRun()
   pcall(function()
-    if service and service.getEditText() then
-      executeVoiceTyping()
-    else
-      showMainMenu()
-    end
+    if service and service.getEditText() then executeVoiceTyping() else showMainMenu() end
   end)
 end
 
