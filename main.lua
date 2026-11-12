@@ -20,14 +20,308 @@ import "java.lang.Thread"
 import "android.os.Handler"
 import "android.os.Looper"
 import "com.androlua.Http"
-import "android.media.MediaPlayer"
 import "android.graphics.Color"
+import "android.media.ToneGenerator"
+import "android.media.AudioManager"
+import "android.os.Vibrator"
+import "android.os.Build"
+import "android.os.VibrationEffect"
+import "java.io.File"
+
+-- ===== Auto Update System =====
+local CURRENT_VERSION = "1.0"
+local VERSION_URL = "https://raw.githubusercontent.com/aftabali012010-bot/Urdu-to-English-typing-by-CSR-expert/main/Virgin.Txt"
+local WHATSNEW_URL = "https://raw.githubusercontent.com/aftabali012010-bot/Urdu-to-English-typing-by-CSR-expert/main/WhatsNew.txt"
+local UPDATE_CODE_URL = "https://raw.githubusercontent.com/aftabali012010-bot/Urdu-to-English-typing-by-CSR-expert/main/main.lua"
+local PLUGIN_PATH = (function()
+    local src = debug.getinfo(1, "S").source
+    return src and src:match("^@?(.*)$") or ""
+end)()
+local updateInProgress = false
 
 local function getCtx()
   if service then return service end
   if activity then return activity end
   return this
 end
+
+local prefsAutoUpdate = nil
+pcall(function()
+  local ctx = getCtx()
+  if ctx then
+    prefsAutoUpdate = ctx.getSharedPreferences("AutoUpdatePrefs", Context.MODE_PRIVATE)
+  end
+end)
+
+local function playNotification()
+    pcall(function()
+        local tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100)
+        tone.startTone(ToneGenerator.TONE_PROP_ACK, 100)
+        local ctx = getCtx()
+        local vibrator = ctx and ctx.getSystemService(Context.VIBRATOR_SERVICE) or nil
+        if vibrator then
+            if Build.VERSION.SDK_INT >= 26 then
+                vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+            else
+                vibrator.vibrate(200)
+            end
+        end
+    end)
+end
+
+local function trimAuto(s)
+    if s == nil then return "" end
+    return tostring(s):gsub("^%s*(.-)%s*$", "%1")
+end
+
+local function showUpdateErrorDialog(title, message)
+    Handler(Looper.getMainLooper()).post(Runnable({
+        run = function()
+            local errorDialog = LuaDialog(getCtx())
+            errorDialog.setTitle(title)
+            errorDialog.setMessage(message)
+            errorDialog.setButton("OK", function()
+                errorDialog.dismiss()
+            end)
+            errorDialog.show()
+        end
+    }))
+end
+
+local function checkAndShowNewFeatures()
+    -- No new features provided
+end
+
+-- ===== NAYA KAAM: Update ke baad alag se WhatsNew Dialog =====
+-- Yeh dialog Update Successful ke baad alag se aayega
+-- Is me 1,2,3,4 karke poori description hogi
+local function showWhatsNewDialog(whatsNewText, onOk)
+    Handler(Looper.getMainLooper()).post(Runnable({
+        run = function()
+            playNotification()
+            local whatsNewDlg = LuaDialog(getCtx())
+            whatsNewDlg.setTitle("What's New in Version " .. CURRENT_VERSION)
+            local msg = "Update Successfully Installed!\n\nWhat's New in this update:\n\n"
+            if whatsNewText and trimAuto(whatsNewText) ~= "" then
+                msg = msg .. trimAuto(whatsNewText)
+            else
+                msg = msg .. "1. Bugs Fixed\n2. Performance Improved\n3. New Features Added"
+            end
+            msg = msg .. "\n\nClick OK to restart and apply the update."
+            whatsNewDlg.setMessage(msg)
+            whatsNewDlg.setButton("OK", function()
+                whatsNewDlg.dismiss()
+                if onOk then pcall(function() onOk() end) end
+            end)
+            whatsNewDlg.show()
+        end
+    }))
+end
+
+local function performUpdate(mainCode, onlineVersion, whatsNewText)
+    if not mainCode or trimAuto(mainCode) == "" then
+        showUpdateErrorDialog("Update Failed", "Main plugin code is empty.")
+        return
+    end
+
+    updateInProgress = true
+
+    local function updateProcess()
+        local currentFileSrc = debug.getinfo(1, "S").source
+        local currentFilePath = currentFileSrc and currentFileSrc:match("^@?(.*)$") or ""
+
+        if currentFilePath ~= "" and currentFilePath ~= PLUGIN_PATH then
+            pcall(function()
+                os.rename(currentFilePath, PLUGIN_PATH)
+            end)
+        end
+
+        local success = false
+        local tempPath = PLUGIN_PATH .. ".temp_update"
+        local f = io.open(tempPath, "w")
+        if f then
+            f:write(mainCode)
+            f:close()
+
+            local fileExists = io.open(PLUGIN_PATH, "r")
+            if fileExists then
+                fileExists:close()
+                local delSuccess = pcall(function()
+                    os.remove(PLUGIN_PATH)
+                end)
+                if delSuccess then
+                    local renameSuccess = pcall(function()
+                        os.rename(tempPath, PLUGIN_PATH)
+                    end)
+                    if renameSuccess then
+                        success = true
+                    end
+                end
+            else
+                local renameSuccess = pcall(function()
+                    os.rename(tempPath, PLUGIN_PATH)
+                end)
+                if renameSuccess then
+                    success = true
+                end
+            end
+
+            if not success then
+                pcall(function() os.remove(tempPath) end)
+            end
+        end
+
+        if success then
+            updateInProgress = false
+            Handler(Looper.getMainLooper()).post(Runnable({
+                run = function()
+                    playNotification()
+                    local successDialog = LuaDialog(getCtx())
+                    successDialog.setTitle("Update Successful")
+                    successDialog.setMessage("Successfully updated to the latest version " .. onlineVersion .. ".\n\nClick OK to see What's New.")
+                    successDialog.setButton("OK", function()
+                        successDialog.dismiss()
+                        -- Yahan se alag se WhatsNew wala dialog aayega
+                        showWhatsNewDialog(whatsNewText, function()
+                            Handler(Looper.getMainLooper()).post(Runnable({
+                                run = function()
+                                    pcall(function() if _G.mainDialog then _G.mainDialog.dismiss() _G.mainDialog = nil end end)
+                                    pcall(function() if _G.mainDlg then _G.mainDlg.dismiss() _G.mainDlg = nil end end)
+                                    pcall(function() if _G.allDialogBox then _G.allDialogBox.dismiss() _G.allDialogBox = nil end end)
+                                    pcall(function() if _G.alertDialogBox then _G.alertDialogBox.dismiss() _G.alertDialogBox = nil end end)
+
+                                    pcall(function() if _G.dismissAllDialogs then _G.dismissAllDialogs() end end)
+                                    pcall(function() if _G.dismissAll then _G.dismissAll() end end)
+                                    pcall(function() if _G.dismiss then _G.dismiss() end end)
+                                    pcall(function() if dismissAllDialogs then dismissAllDialogs() end end)
+                                    pcall(function() if dismissAll then dismissAll() end end)
+
+                                    pcall(function()
+                                        if activity then
+                                            activity.finish()
+                                        end
+                                    end)
+                                end
+                            }))
+
+                            Handler(Looper.getMainLooper()).postDelayed(Runnable({
+                                run = function()
+                                    if prefsAutoUpdate then
+                                      pcall(function() prefsAutoUpdate.edit().putString("lastShownVersion", "").apply() end)
+                                    end
+                                    local pluginFile = io.open(PLUGIN_PATH, "r")
+                                    if pluginFile then
+                                        pluginFile:close()
+                                        local func, err = loadfile(PLUGIN_PATH)
+                                        if func then
+                                            pcall(func)
+                                        else
+                                            Toast.makeText(getCtx(), "Error reloading plugin: " .. tostring(err), Toast.LENGTH_SHORT).show()
+                                        end
+                                    end
+                                end
+                            }), 2000)
+                        end)
+                    end)
+                    successDialog.show()
+                end
+            }))
+            return
+        else
+            updateInProgress = false
+            showUpdateErrorDialog("Update Failed", "Update failed. Please try again.")
+        end
+    end
+
+    local updateThread = Thread(Runnable{
+        run = updateProcess
+    })
+    updateThread.start()
+end
+
+-- ===== Check Update - Auto + Manual dono ke liye =====
+local function checkUpdate(isManual)
+    if updateInProgress then
+        return
+    end
+
+    local timestamp = tostring(System.currentTimeMillis())
+    Http.get(VERSION_URL .. "?t=" .. timestamp, function(code, response)
+        if code == 200 and response then
+            local onlineVersion = trimAuto(response)
+            if onlineVersion ~= CURRENT_VERSION then
+                -- Pehle WhatsNew.txt ko alag se load karo, lekin Update wale dialog me mat dikhao
+                Http.get(WHATSNEW_URL .. "?t=" .. timestamp, function(codeW, whatsNewText)
+                    local savedWhatsNew = ""
+                    if codeW == 200 and whatsNewText and trimAuto(whatsNewText) ~= "" then
+                        savedWhatsNew = trimAuto(whatsNewText)
+                    end
+                    Http.get(UPDATE_CODE_URL .. "?t=" .. timestamp, function(code2, mainCode)
+                        if code2 == 200 and mainCode and trimAuto(mainCode) ~= "" then
+                            Handler(Looper.getMainLooper()).post(Runnable({
+                                run = function()
+                                    playNotification()
+                                    local updateAlertDlg = LuaDialog(getCtx())
+                                    updateAlertDlg.setTitle("Update Available!")
+                                    -- Yahan sirf version batayenge, Description yahan nahi dikhayenge
+                                    updateAlertDlg.setMessage("A new version (" .. onlineVersion .. ") is available.\nCurrent version: " .. CURRENT_VERSION .. "\n\nWould you like to update now?")
+                                    updateAlertDlg.setButton("Update Now", function()
+                                        updateAlertDlg.dismiss()
+                                        Toast.makeText(getCtx(), "Downloading update...", Toast.LENGTH_SHORT).show()
+                                        performUpdate(mainCode, onlineVersion, savedWhatsNew)
+                                    end)
+                                    updateAlertDlg.setButton2("Later", function()
+                                        updateAlertDlg.dismiss()
+                                    end)
+                                    updateAlertDlg.show()
+                                end
+                            }))
+                        end
+                    end)
+                end)
+            else
+                if isManual then
+                    Handler(Looper.getMainLooper()).post(Runnable({
+                        run = function()
+                            local noUpdateDlg = LuaDialog(getCtx())
+                            noUpdateDlg.setTitle("No Update Available")
+                            noUpdateDlg.setMessage("You are using the latest version " .. CURRENT_VERSION .. ".\n\nUpdate is not available.")
+                            noUpdateDlg.setButton("OK", function()
+                                noUpdateDlg.dismiss()
+                            end)
+                            noUpdateDlg.show()
+                        end
+                    }))
+                else
+                    checkAndShowNewFeatures()
+                end
+            end
+        else
+            if isManual then
+                Handler(Looper.getMainLooper()).post(Runnable({
+                    run = function()
+                        local failDlg = LuaDialog(getCtx())
+                        failDlg.setTitle("Check Failed")
+                        failDlg.setMessage("Failed to check update. Please check your internet and try again.")
+                        failDlg.setButton("OK", function()
+                            failDlg.dismiss()
+                        end)
+                        failDlg.show()
+                    end
+                }))
+            else
+                checkAndShowNewFeatures()
+            end
+        end
+    end)
+end
+
+Handler(Looper.getMainLooper()).postDelayed(Runnable({
+    run = function()
+        checkUpdate(false)
+    end
+}), 3000)
+-- ===== End Auto Update System =====
 
 function showToast(message)
   pcall(function()
@@ -72,6 +366,51 @@ local function urlEncode(s)
     return string.format("%%%02X", string.byte(c))
   end))
 end
+
+local function openUrl(url)
+  pcall(function()
+    local ctx = getCtx()
+    if ctx then
+      local intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      ctx.startActivity(intent)
+    end
+  end)
+end
+
+-- ===== Link par click karne par Extension poori tarah band ho jaye =====
+local function closeExtensionCompletely()
+  pcall(function()
+    if _G.mainDialog then _G.mainDialog.dismiss() _G.mainDialog = nil end
+  end)
+  pcall(function()
+    if _G.mainDlg then _G.mainDlg.dismiss() _G.mainDlg = nil end
+  end)
+  pcall(function()
+    if _G.allDialogBox then _G.allDialogBox.dismiss() _G.allDialogBox = nil end
+  end)
+  pcall(function()
+    if _G.alertDialogBox then _G.alertDialogBox.dismiss() _G.alertDialogBox = nil end
+  end)
+  pcall(function()
+    if activity then
+      activity.finish()
+    end
+  end)
+end
+
+local function openLinkAndClose(dlg, url)
+  pcall(function()
+    if dlg then dlg.dismiss() end
+  end)
+  openUrl(url)
+  Handler(Looper.getMainLooper()).postDelayed(Runnable({
+    run = function()
+      closeExtensionCompletely()
+    end
+  }), 300)
+end
+-- ===== End Fix =====
 
 -- ===== Feedback System =====
 local function createOverlayDialog(view)
@@ -230,197 +569,6 @@ local showTypingModeDialog
 local showLanguageDialog
 local showConnectDialog
 local showAboutDialog
-local showTutorialDialog
-
--- Global MediaPlayer reference for Tutorial
-local currentMediaPlayer = nil
-
-local function cleanupAudioPlayer()
-  if currentMediaPlayer then
-    pcall(function()
-      if currentMediaPlayer.isPlaying() then
-        currentMediaPlayer.stop()
-      end
-      currentMediaPlayer.release()
-    end)
-    currentMediaPlayer = nil
-  end
-end
-
-function showTutorialDialog()
-  cleanupAudioPlayer()
-
-  local ctx = getCtx()
-  local audioLayout = LinearLayout(ctx)
-  audioLayout.setOrientation(1)
-  audioLayout.setPadding(40, 40, 40, 40)
-  audioLayout.setBackgroundColor(Color.parseColor("#1A252F"))
-
-  local titleTxt = TextView(ctx)
-  titleTxt.setText("Playing Tutorial Audio...")
-  titleTxt.setTextColor(Color.WHITE)
-  titleTxt.setTextSize(16)
-  titleTxt.setGravity(Gravity.CENTER)
-  titleTxt.setPadding(0, 0, 0, 20)
-  audioLayout.addView(titleTxt)
-
-  local seekBar = SeekBar(ctx)
-  local seekParams = LinearLayout.LayoutParams(-1, -2)
-  seekParams.setMargins(0, 15, 0, 10)
-  seekBar.setLayoutParams(seekParams)
-  audioLayout.addView(seekBar)
-
-  local timerTxt = TextView(ctx)
-  timerTxt.setText("00:00 / 00:00")
-  timerTxt.setTextColor(Color.WHITE)
-  timerTxt.setGravity(Gravity.CENTER)
-  audioLayout.addView(timerTxt)
-
-  local controls = LinearLayout(ctx)
-  controls.setOrientation(0)
-  controls.setGravity(Gravity.CENTER)
-  controls.setPadding(0, 15, 0, 5)
-
-  local rewBtn = Button(ctx)
-  rewBtn.setText("-10s")
-  rewBtn.setTextColor(Color.WHITE)
-  rewBtn.setBackgroundColor(Color.parseColor("#34495E"))
-  rewBtn.onClick = function()
-    pcall(function()
-      if currentMediaPlayer then
-        local current = currentMediaPlayer.getCurrentPosition()
-        currentMediaPlayer.seekTo(math.max(0, current - 10000))
-      end
-    end)
-  end
-  controls.addView(rewBtn)
-
-  local playPauseBtn = Button(ctx)
-  playPauseBtn.setText("Play")
-  playPauseBtn.setTextColor(Color.WHITE)
-  playPauseBtn.setBackgroundColor(Color.parseColor("#27AE60"))
-  playPauseBtn.onClick = function()
-    pcall(function()
-      if currentMediaPlayer then
-        if currentMediaPlayer.isPlaying() then
-          currentMediaPlayer.pause()
-          playPauseBtn.setText("Play")
-          playPauseBtn.setBackgroundColor(Color.parseColor("#27AE60"))
-          titleTxt.setText("Tutorial Paused")
-        else
-          currentMediaPlayer.start()
-          playPauseBtn.setText("Pause")
-          playPauseBtn.setBackgroundColor(Color.parseColor("#E74C3C"))
-          titleTxt.setText("Playing Tutorial Audio...")
-        end
-      end
-    end)
-  end
-  controls.addView(playPauseBtn)
-
-  local ffBtn = Button(ctx)
-  ffBtn.setText("+10s")
-  ffBtn.setTextColor(Color.WHITE)
-  ffBtn.setBackgroundColor(Color.parseColor("#34495E"))
-  ffBtn.onClick = function()
-    pcall(function()
-      if currentMediaPlayer then
-        local current = currentMediaPlayer.getCurrentPosition()
-        local duration = currentMediaPlayer.getDuration()
-        currentMediaPlayer.seekTo(math.min(duration, current + 10000))
-      end
-    end)
-  end
-  controls.addView(ffBtn)
-
-  audioLayout.addView(controls)
-
-  local handler = Handler()
-  local updateTask
-  updateTask = Runnable({
-    run = function()
-      pcall(function()
-        if currentMediaPlayer and currentMediaPlayer.isPlaying() then
-          local current = currentMediaPlayer.getCurrentPosition()
-          local total = currentMediaPlayer.getDuration()
-          if total > 0 then
-            seekBar.setMax(total)
-            seekBar.setProgress(current)
-
-            local curSec = math.floor(current / 1000)
-            local totSec = math.floor(total / 1000)
-            local curMin = math.floor(curSec / 60)
-            local totMin = math.floor(totSec / 60)
-            curSec = curSec % 60
-            totSec = totSec % 60
-            timerTxt.setText(string.format("%02d:%02d / %02d:%02d", curMin, curSec, totMin, totSec))
-          end
-        end
-      end)
-      handler.postDelayed(updateTask, 1000)
-    end
-  })
-
-  seekBar.setOnSeekBarChangeListener({
-    onProgressChanged = function(bar, progress, fromUser)
-      pcall(function()
-        if fromUser and currentMediaPlayer then
-          currentMediaPlayer.seekTo(progress)
-        end
-      end)
-    end,
-    onStartTrackingTouch = function(bar) end,
-    onStopTrackingTouch = function(bar) end
-  })
-
-  -- Online URL streaming (Exact mechanism from your provided open-source code)
-  pcall(function()
-    local audioUrl = "https://raw.githubusercontent.com/handcricket385-pixel/dictionary-manager/main/Dictionary%20Manager%20Pro%20Tutorial.%20.mp3"
-    
-    currentMediaPlayer = MediaPlayer()
-    currentMediaPlayer.setDataSource(audioUrl)
-    
-    currentMediaPlayer.setOnPreparedListener({
-      onPrepared = function(mp)
-        pcall(function()
-          if currentMediaPlayer then
-            currentMediaPlayer.start()
-            playPauseBtn.setText("Pause")
-            playPauseBtn.setBackgroundColor(Color.parseColor("#E74C3C"))
-            handler.post(updateTask)
-          end
-        end)
-      end
-    })
-
-    currentMediaPlayer.setOnCompletionListener({
-      onCompletion = function(mp)
-        pcall(function()
-          playPauseBtn.setText("Play")
-          playPauseBtn.setBackgroundColor(Color.parseColor("#27AE60"))
-          titleTxt.setText("Tutorial Finished")
-        end)
-      end
-    })
-
-    currentMediaPlayer.prepareAsync()
-  end)
-
-  local audioDialog = LuaDialog(ctx).setTitle("How to Use - Tutorial Audio").setView(audioLayout)
-  audioDialog.setNegativeButton("Close", function()
-    cleanupAudioPlayer()
-    pcall(function() handler.removeCallbacks(updateTask) end)
-    showMainMenu()
-  end)
-  audioDialog.setOnCancelListener(DialogInterface.OnCancelListener{
-    onCancel = function(dialog)
-      cleanupAudioPlayer()
-      pcall(function() handler.removeCallbacks(updateTask) end)
-      showMainMenu()
-    end
-  })
-  audioDialog.show()
-end
 
 function showMainMenu()
   local dlg = LuaDialog()
@@ -468,8 +616,7 @@ function showMainMenu()
       textSize = "16sp",
       layout_marginBottom = "15dp",
       onClick = function()
-        dlg.dismiss()
-        showTutorialDialog()
+        openLinkAndClose(dlg, "https://youtu.be/_8t1uGKrtVM?si=-6TkbaKTnbDpsIhF")
       end
     },
     {
@@ -698,18 +845,6 @@ function showConnectDialog()
   local dlg = LuaDialog()
   dlg.setTitle("Connect with us")
 
-  local function openUrl(url)
-    pcall(function()
-      dlg.dismiss()
-      local ctx = getCtx()
-      if ctx then
-        local intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        ctx.startActivity(intent)
-      end
-    end)
-  end
-
   local layout = {
     LinearLayout,
     orientation = "vertical",
@@ -724,6 +859,12 @@ function showConnectDialog()
       TextView,
       text = "Developer: Aftab Ali",
       textSize = "14sp",
+      layout_marginBottom = "10dp"
+    },
+    {
+      TextView,
+      text = "Connect with CSR Expert - Download Extension Tools, Join Groups, Get Updates and Send Feedback. We make accessible tools for blind and low-vision users.",
+      textSize = "13sp",
       layout_marginBottom = "15dp"
     },
     {
@@ -746,7 +887,7 @@ function showConnectDialog()
       textSize = "16sp",
       layout_marginBottom = "15dp",
       onClick = function()
-        openUrl("https://whatsapp.com/channel/0029VbDnvmF96H4IdkNQHr16")
+        openLinkAndClose(dlg, "https://whatsapp.com/channel/0029VbDnvmF96H4IdkNQHr16")
       end
     },
     {
@@ -755,7 +896,16 @@ function showConnectDialog()
       textSize = "16sp",
       layout_marginBottom = "15dp",
       onClick = function()
-        openUrl("https://wa.me/923425037026?text=Hi,%20I%20want%20to%20join%20the%20group.%20Please%20provide%20the%20Group%20Guidelines.")
+        openLinkAndClose(dlg, "https://wa.me/923425037026?text=" .. urlEncode("Hi, I want to join CSR Expert Male Group. Please provide the Group Guidelines."))
+      end
+    },
+    {
+      Button,
+      text = "CSR Expert Female Group",
+      textSize = "16sp",
+      layout_marginBottom = "15dp",
+      onClick = function()
+        openLinkAndClose(dlg, "https://wa.me/923425037026?text=" .. urlEncode("Hi, I am female and I want to join CSR Expert Female Group. Please provide the Group Guidelines."))
       end
     },
     {
@@ -764,7 +914,7 @@ function showConnectDialog()
       textSize = "16sp",
       layout_marginBottom = "15dp",
       onClick = function()
-        openUrl("https://whatsapp.com/channel/0029VbCfIq3Fi8xXRpRxqP1B")
+        openLinkAndClose(dlg, "https://whatsapp.com/channel/0029VbCfIq3Fi8xXRpRxqP1B")
       end
     },
     {
@@ -773,7 +923,7 @@ function showConnectDialog()
       textSize = "16sp",
       layout_marginBottom = "15dp",
       onClick = function()
-        openUrl("https://youtube.com/@csrexpert-d5v?si=OelPFiiGQ2QKRY_a")
+        openLinkAndClose(dlg, "https://youtube.com/@csrexpertofficial?si=L_w5MkFX_7yJLDrS")
       end
     },
     {
@@ -782,7 +932,7 @@ function showConnectDialog()
       textSize = "16sp",
       layout_marginBottom = "15dp",
       onClick = function()
-        openUrl("https://t.me/Allaccessiblethings")
+        openLinkAndClose(dlg, "https://t.me/Allaccessiblethings")
       end
     },
     {
@@ -791,7 +941,16 @@ function showConnectDialog()
       textSize = "16sp",
       layout_marginBottom = "15dp",
       onClick = function()
-        openUrl("https://t.me/csrcd")
+        openLinkAndClose(dlg, "https://t.me/csrcd")
+      end
+    },
+    {
+      Button,
+      text = "Check for Updates",
+      textSize = "16sp",
+      layout_marginBottom = "15dp",
+      onClick = function()
+        checkUpdate(true)
       end
     },
     {
@@ -877,16 +1036,17 @@ function fetchTranslation(spokenText, sourceLangCode, callback)
 end
 
 function executeVoiceTyping()
-  if not service or not service.getEditText() then
-    if service then
+  local serviceObj = service
+  if not serviceObj or not serviceObj.getEditText() then
+    if serviceObj then
       pcall(function()
-        service.asyncSpeak("Text Box Not Found!")
+        serviceObj.asyncSpeak("Text Box Not Found!")
       end)
     end
     return false
   end
 
-  local targetEditText = service.getEditText()
+  local targetEditText = serviceObj.getEditText()
 
   local currentMode = loadSetting("selectedMode", "Urdu to English")
   local spokenLang = "ur-PK"
@@ -903,7 +1063,7 @@ function executeVoiceTyping()
   recordIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
   recordIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, spokenLang)
 
-  local speechRecord = SpeechRecognizer.createSpeechRecognizer(service)
+  local speechRecord = SpeechRecognizer.createSpeechRecognizer(serviceObj)
   speechRecord.setRecognitionListener{
     onResults = function(results)
       pcall(function()
@@ -913,18 +1073,18 @@ function executeVoiceTyping()
 
           fetchTranslation(spokenText, sourceLangCode, function(finalText)
             pcall(function()
-              local et = targetEditText or service.getEditText()
+              local et = targetEditText or serviceObj.getEditText()
               if et then
-                service.insertText(et, finalText .. autoPunctuation)
+                serviceObj.insertText(et, finalText .. autoPunctuation)
               end
             end)
             pcall(function()
-              service.speak(finalText)
+              serviceObj.speak(finalText)
             end)
           end)
         else
           pcall(function()
-            service.asyncSpeak("I Did Not Understand Your Message!")
+            serviceObj.asyncSpeak("I Did Not Understand Your Message!")
           end)
         end
       end)
@@ -937,7 +1097,7 @@ function executeVoiceTyping()
         speechRecord.destroy()
       end)
       pcall(function()
-        service.asyncSpeak("I Did Not Understand Your Message!")
+        serviceObj.asyncSpeak("I Did Not Understand Your Message!")
       end)
     end
   }
