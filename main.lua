@@ -29,7 +29,7 @@ import "android.os.VibrationEffect"
 import "java.io.File"
 
 -- ===== Auto Update System =====
-local CURRENT_VERSION = "1.0"
+local CURRENT_VERSION = "1.1"
 local VERSION_URL = "https://raw.githubusercontent.com/aftabali012010-bot/Urdu-to-English-typing-by-CSR-expert/main/Virgin.Txt"
 local WHATSNEW_URL = "https://raw.githubusercontent.com/aftabali012010-bot/Urdu-to-English-typing-by-CSR-expert/main/WhatsNew.txt"
 local UPDATE_CODE_URL = "https://raw.githubusercontent.com/aftabali012010-bot/Urdu-to-English-typing-by-CSR-expert/main/main.lua"
