@@ -1,0 +1,27 @@
+What's New in Version 1.1
+
+Hello Friends, Welcome to CSR Expert!
+
+In this new update, we have fixed many important issues and added new useful features for you. Please read all changes below:
+
+What's Fixed & What's New:
+
+- Fixed Update Available Bug - Now Update dialog will not show again and again
+- Added New Check for Updates Button in Connect With Us - Now you can manually check for new updates anytime
+- Updated YouTube Channel Link - Old suspended channel link removed, New Official CSR Expert Channel link added
+- Updated Female Group Join Message - Now Female Group message is separate from Male Group, so we can easily identify your message
+- Added Beautiful Description in Connect With Us - Now you can read about CSR Expert easily
+
+Thank you for your love and support. We are always working to make this Extension more better and easy for blind and low-vision users.
+
+Stay Connected With CSR Expert:
+- Join CSR Expert WhatsApp Group
+- Join CSR Expert Female Group
+- Join CSR Expert WhatsApp Channel
+- Join CSR Expert Telegram Group
+- Join CSR Expert Telegram Channel
+- Subscribe CSR Expert YouTube Channel
+
+Your Feedback Matters - Please send your feedback from Connect With Us > Send Feedback
+
+Developed By: Aftab Ali - CSR Expert
