@@ -28,6 +28,15 @@ import "android.os.Build"
 import "android.os.VibrationEffect"
 import "java.io.File"
 
+-- ===== PAKA FIX 1: Double Execution Roko =====
+-- Agar extension pehle se chal rahi hai to dobara uske upar mat chalao
+-- Yahi wajah thi ke extension ke upar extension aa jati thi
+if _G.__CSR_EXTENSION_RUNNING == true then
+  return
+end
+_G.__CSR_EXTENSION_RUNNING = true
+-- ===== End Fix 1 =====
+
 -- ===== Auto Update System =====
 local VERSION_URL = "https://raw.githubusercontent.com/aftabali012010-bot/Urdu-to-English-typing-by-CSR-expert/main/Virgin.Txt"
 local WHATSNEW_URL = "https://raw.githubusercontent.com/aftabali012010-bot/Urdu-to-English-typing-by-CSR-expert/main/WhatsNew.txt"
@@ -37,6 +46,7 @@ local PLUGIN_PATH = (function()
     return src and src:match("^@?(.*)$") or ""
 end)()
 local updateInProgress = false
+local updateDialogShowing = false
 
 local function getCtx()
   if service then return service end
@@ -52,9 +62,6 @@ pcall(function()
   end
 end)
 
--- ===== PAKA FIX: Version File se nahi, Memory se lenge =====
--- File wali 1.0 kabhi change nahi hoti is liye har bar 1.0 dikhata tha
--- Ab jo version Update hoga wo Memory me save ho jayega
 local function getSavedVersion()
   local v = "1.0"
   pcall(function()
@@ -72,14 +79,7 @@ local function saveInstalledVersion(v)
   end)
 end
 
--- Pehli dafa agar Memory khali hai to File wala version le lo, warna Memory wala
 local CURRENT_VERSION = getSavedVersion()
--- Agar pehli dafa hai aur File me 1.1 hai to usko bhi Memory me save kar do
-if CURRENT_VERSION == "1.0" then
-  -- File me jo likha hai wo 1.1 hai lekin Memory me 1.0 hai, is liye pehli dafa 1.0 hi rahega
-  -- Jab Update hoga tab Memory 1.1 ho jayegi
-end
--- ===== End Paka Fix =====
 
 local function isAlreadyUpdatedTo(ver)
   local saved = ""
@@ -145,7 +145,7 @@ local function showWhatsNewDialog(whatsNewText, onOk)
             else
                 msg = msg .. "1. Bugs Fixed\n2. Performance Improved\n3. New Features Added"
             end
-            msg = msg .. "\n\nClick OK to restart and apply the update."
+            msg = msg .. "\n\nClick OK to restart."
             whatsNewDlg.setMessage(msg)
             whatsNewDlg.setButton("OK", function()
                 whatsNewDlg.dismiss()
@@ -156,19 +156,64 @@ local function showWhatsNewDialog(whatsNewText, onOk)
     }))
 end
 
+-- ===== PAKA FIX 2: Sahi Restart =====
+-- Pehle sab kuch poori tarah band karo, phir akeli nayi extension chalao
+-- Pehle wale code me band kiye baghair hi loadfile kar diya tha, is liye double ho jata tha
+local function doCleanRestart()
+  -- Restart ho raha hai, is liye purana flag khatam karo taake nayi wali chal sake
+  _G.__CSR_EXTENSION_RUNNING = false
+
+  -- 1. Saare Dialog band karo
+  pcall(function() if _G.mainDialog then _G.mainDialog.dismiss() _G.mainDialog = nil end end)
+  pcall(function() if _G.mainDlg then _G.mainDlg.dismiss() _G.mainDlg = nil end end)
+  pcall(function() if _G.allDialogBox then _G.allDialogBox.dismiss() _G.allDialogBox = nil end end)
+  pcall(function() if _G.alertDialogBox then _G.alertDialogBox.dismiss() _G.alertDialogBox = nil end end)
+  pcall(function() if _G.dismissAllDialogs then _G.dismissAllDialogs() end end)
+  pcall(function() if _G.dismissAll then _G.dismissAll() end end)
+
+  -- 2. Activity poori tarah band karo
+  pcall(function()
+    if activity then activity.finish() end
+  end)
+
+  -- 3. 1200ms ruk kar akeli nayi extension chalao, purani ke upar nahi
+  Handler(Looper.getMainLooper()).postDelayed(Runnable({
+    run = function()
+      -- Agar pehle se chal rahi hai to dobara mat chalao
+      if _G.__CSR_EXTENSION_RUNNING == true then return end
+      pcall(function()
+        if prefsAutoUpdate then prefsAutoUpdate.edit().putString("lastShownVersion", "").apply() end
+      end)
+      local pluginFile = io.open(PLUGIN_PATH, "r")
+      if pluginFile then
+        pluginFile:close()
+        local func, err = loadfile(PLUGIN_PATH)
+        if func then
+          pcall(func)
+        else
+          Toast.makeText(getCtx(), "Error reloading plugin: " .. tostring(err), Toast.LENGTH_SHORT).show()
+          _G.__CSR_EXTENSION_RUNNING = false
+        end
+      else
+        _G.__CSR_EXTENSION_RUNNING = false
+      end
+    end
+  }), 1200)
+end
+-- ===== End Fix 2 =====
+
 local function performUpdate(mainCode, onlineVersion, whatsNewText)
     if not mainCode or trimAuto(mainCode) == "" then
         showUpdateErrorDialog("Update Failed", "Main plugin code is empty.")
         return
     end
     updateInProgress = true
+    updateDialogShowing = false
     local function updateProcess()
         local currentFileSrc = debug.getinfo(1, "S").source
         local currentFilePath = currentFileSrc and currentFileSrc:match("^@?(.*)$") or ""
         if currentFilePath ~= "" and currentFilePath ~= PLUGIN_PATH then
-            pcall(function()
-                os.rename(currentFilePath, PLUGIN_PATH)
-            end)
+            pcall(function() os.rename(currentFilePath, PLUGIN_PATH) end)
         end
         local success = false
         local tempPath = PLUGIN_PATH .. ".temp_update"
@@ -190,15 +235,11 @@ local function performUpdate(mainCode, onlineVersion, whatsNewText)
             end
             if not success then pcall(function() os.remove(tempPath) end) end
         end
-        -- ===== YAHAN PAKA FIX HAI =====
-        -- Chahe File Replace ho ya na ho, hum Version ko Memory me save kar denge
-        -- Taake agli dafa wo 1.0 na dikhaye, 1.1 dikhaye
-        -- Is liye Update Available dobara nahi aayega
+        -- Chahe file replace ho ya na ho, version Memory me save karo
         markAsUpdatedTo(onlineVersion)
         saveInstalledVersion(onlineVersion)
         CURRENT_VERSION = onlineVersion
         success = true
-        -- ===== End Paka Fix =====
         if success then
             updateInProgress = false
             Handler(Looper.getMainLooper()).post(Runnable({
@@ -210,32 +251,8 @@ local function performUpdate(mainCode, onlineVersion, whatsNewText)
                     successDialog.setButton("OK", function()
                         successDialog.dismiss()
                         showWhatsNewDialog(whatsNewText, function()
-                            Handler(Looper.getMainLooper()).post(Runnable({
-                                run = function()
-                                    pcall(function() if _G.mainDialog then _G.mainDialog.dismiss() _G.mainDialog = nil end end)
-                                    pcall(function() if _G.mainDlg then _G.mainDlg.dismiss() _G.mainDlg = nil end end)
-                                    pcall(function() if _G.allDialogBox then _G.allDialogBox.dismiss() _G.allDialogBox = nil end end)
-                                    pcall(function() if _G.alertDialogBox then _G.alertDialogBox.dismiss() _G.alertDialogBox = nil end end)
-                                    pcall(function() if _G.dismissAllDialogs then _G.dismissAllDialogs() end end)
-                                    pcall(function() if _G.dismissAll then _G.dismissAll() end end)
-                                    pcall(function() if _G.dismiss then _G.dismiss() end end)
-                                    pcall(function() if dismissAllDialogs then dismissAllDialogs() end end)
-                                    pcall(function() if dismissAll then dismissAll() end end)
-                                    pcall(function() if activity then activity.finish() end end)
-                                end
-                            }))
-                            Handler(Looper.getMainLooper()).postDelayed(Runnable({
-                                run = function()
-                                    if prefsAutoUpdate then pcall(function() prefsAutoUpdate.edit().putString("lastShownVersion", "").apply() end) end
-                                    local pluginFile = io.open(PLUGIN_PATH, "r")
-                                    if pluginFile then
-                                        pluginFile:close()
-                                        local func, err = loadfile(PLUGIN_PATH)
-                                        if func then pcall(func)
-                                        else Toast.makeText(getCtx(), "Error reloading plugin: " .. tostring(err), Toast.LENGTH_SHORT).show() end
-                                    end
-                                end
-                            }), 2000)
+                          -- Yahan se sahi restart hoga, double nahi hoga
+                          doCleanRestart()
                         end)
                     end)
                     successDialog.show()
@@ -253,6 +270,8 @@ end
 
 local function checkUpdate(isManual)
     if updateInProgress then return end
+    -- Agar Update Dialog pehle se khula hai to dobara mat kholo
+    if updateDialogShowing == true and not isManual then return end
     local timestamp = tostring(System.currentTimeMillis())
     Http.get(VERSION_URL .. "?t=" .. timestamp, function(code, response)
         if code == 200 and response then
@@ -268,16 +287,20 @@ local function checkUpdate(isManual)
                         if code2 == 200 and mainCode and trimAuto(mainCode) ~= "" then
                             Handler(Looper.getMainLooper()).post(Runnable({
                                 run = function()
+                                    if updateDialogShowing == true then return end
+                                    updateDialogShowing = true
                                     playNotification()
                                     local updateAlertDlg = LuaDialog(getCtx())
                                     updateAlertDlg.setTitle("Update Available!")
                                     updateAlertDlg.setMessage("A new version (" .. onlineVersion .. ") is available.\nCurrent version: " .. CURRENT_VERSION .. "\n\nWould you like to update now?")
                                     updateAlertDlg.setButton("Update Now", function()
+                                        updateDialogShowing = false
                                         updateAlertDlg.dismiss()
                                         Toast.makeText(getCtx(), "Downloading update...", Toast.LENGTH_SHORT).show()
                                         performUpdate(mainCode, onlineVersion, savedWhatsNew)
                                     end)
                                     updateAlertDlg.setButton2("Later", function()
+                                        updateDialogShowing = false
                                         updateAlertDlg.dismiss()
                                     end)
                                     updateAlertDlg.show()
@@ -370,6 +393,7 @@ local function openUrl(url)
 end
 
 local function closeExtensionCompletely()
+  _G.__CSR_EXTENSION_RUNNING = false
   pcall(function() if _G.mainDialog then _G.mainDialog.dismiss() _G.mainDialog = nil end end)
   pcall(function() if _G.mainDlg then _G.mainDlg.dismiss() _G.mainDlg = nil end end)
   pcall(function() if _G.allDialogBox then _G.allDialogBox.dismiss() _G.allDialogBox = nil end end)
@@ -522,7 +546,7 @@ function showMainMenu()
     { Button, text = "Watch Tutorial", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() openLinkAndClose(dlg, "https://youtu.be/_8t1uGKrtVM?si=-6TkbaKTnbDpsIhF") end },
     { Button, text = "About", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() dlg.dismiss() showAboutDialog() end },
     { Button, text = "Connect with us", textSize = "16sp", layout_marginBottom = "15dp", onClick = function() dlg.dismiss() showConnectDialog() end },
-    { Button, text = "Exit", textSize = "16sp", onClick = function() dlg.dismiss() end }
+    { Button, text = "Exit", textSize = "16sp", onClick = function() _G.__CSR_EXTENSION_RUNNING = false dlg.dismiss() end }
   }
   dlg.setView(loadlayout(layout))
   dlg.show()
