@@ -29,8 +29,6 @@ import "android.os.VibrationEffect"
 import "java.io.File"
 
 -- ===== PAKA FIX 1: Double Execution Roko =====
--- Agar extension pehle se chal rahi hai to dobara uske upar mat chalao
--- Yahi wajah thi ke extension ke upar extension aa jati thi
 if _G.__CSR_EXTENSION_RUNNING == true then
   return
 end
@@ -156,30 +154,19 @@ local function showWhatsNewDialog(whatsNewText, onOk)
     }))
 end
 
--- ===== PAKA FIX 2: Sahi Restart =====
--- Pehle sab kuch poori tarah band karo, phir akeli nayi extension chalao
--- Pehle wale code me band kiye baghair hi loadfile kar diya tha, is liye double ho jata tha
 local function doCleanRestart()
-  -- Restart ho raha hai, is liye purana flag khatam karo taake nayi wali chal sake
   _G.__CSR_EXTENSION_RUNNING = false
-
-  -- 1. Saare Dialog band karo
   pcall(function() if _G.mainDialog then _G.mainDialog.dismiss() _G.mainDialog = nil end end)
   pcall(function() if _G.mainDlg then _G.mainDlg.dismiss() _G.mainDlg = nil end end)
   pcall(function() if _G.allDialogBox then _G.allDialogBox.dismiss() _G.allDialogBox = nil end end)
   pcall(function() if _G.alertDialogBox then _G.alertDialogBox.dismiss() _G.alertDialogBox = nil end end)
   pcall(function() if _G.dismissAllDialogs then _G.dismissAllDialogs() end end)
   pcall(function() if _G.dismissAll then _G.dismissAll() end end)
-
-  -- 2. Activity poori tarah band karo
   pcall(function()
     if activity then activity.finish() end
   end)
-
-  -- 3. 1200ms ruk kar akeli nayi extension chalao, purani ke upar nahi
   Handler(Looper.getMainLooper()).postDelayed(Runnable({
     run = function()
-      -- Agar pehle se chal rahi hai to dobara mat chalao
       if _G.__CSR_EXTENSION_RUNNING == true then return end
       pcall(function()
         if prefsAutoUpdate then prefsAutoUpdate.edit().putString("lastShownVersion", "").apply() end
@@ -200,7 +187,6 @@ local function doCleanRestart()
     end
   }), 1200)
 end
--- ===== End Fix 2 =====
 
 local function performUpdate(mainCode, onlineVersion, whatsNewText)
     if not mainCode or trimAuto(mainCode) == "" then
@@ -235,7 +221,6 @@ local function performUpdate(mainCode, onlineVersion, whatsNewText)
             end
             if not success then pcall(function() os.remove(tempPath) end) end
         end
-        -- Chahe file replace ho ya na ho, version Memory me save karo
         markAsUpdatedTo(onlineVersion)
         saveInstalledVersion(onlineVersion)
         CURRENT_VERSION = onlineVersion
@@ -251,7 +236,6 @@ local function performUpdate(mainCode, onlineVersion, whatsNewText)
                     successDialog.setButton("OK", function()
                         successDialog.dismiss()
                         showWhatsNewDialog(whatsNewText, function()
-                          -- Yahan se sahi restart hoga, double nahi hoga
                           doCleanRestart()
                         end)
                     end)
@@ -270,7 +254,6 @@ end
 
 local function checkUpdate(isManual)
     if updateInProgress then return end
-    -- Agar Update Dialog pehle se khula hai to dobara mat kholo
     if updateDialogShowing == true and not isManual then return end
     local timestamp = tostring(System.currentTimeMillis())
     Http.get(VERSION_URL .. "?t=" .. timestamp, function(code, response)
